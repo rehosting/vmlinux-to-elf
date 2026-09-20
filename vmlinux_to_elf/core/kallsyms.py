@@ -485,10 +485,13 @@ class KallsymsFinder:
             logging.info('[+] Kernel found in database')
             logging.info('[+]   Read kernel source: ' + kernel.browse_url)
             logging.info('[+]   Download kernel: ' + kernel.download_url)
-            logging.info(
-                '[+]   Kernel release date: '
-                + kernel.release_date.strftime('%Y-%m-%d')
-            )
+            # peewee < 4 (e.g. 3.19, shipped in nixpkgs) returns a DateField as a
+            # plain ISO string rather than a datetime.date, which has no
+            # strftime(); handle both so symbolization doesn't crash on a DB hit.
+            release_date = kernel.release_date
+            if hasattr(release_date, 'strftime'):
+                release_date = release_date.strftime('%Y-%m-%d')
+            logging.info('[+]   Kernel release date: ' + str(release_date))
             if self.elf_machine:
                 logging.info('[+]   Interesting files:')
                 for file in kernel.relevant_files.select().where(
