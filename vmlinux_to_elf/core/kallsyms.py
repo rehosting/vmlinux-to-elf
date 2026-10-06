@@ -817,6 +817,21 @@ class KallsymsFinder:
                 if self.kernel_img[pos : pos + len(seq)] == seq:
                     break
             else:
+                # The token before "0" is null-terminated, and the tokens
+                # for [a-z] are always present at their own positions
+
+                tokens = self.kernel_img[position : position + 50 * 75].split(
+                    b'\0', ord('z') - ord('0') + 1
+                )
+                letters = [b'%c' % i for i in range(ord('a'), ord('z') + 1)]
+
+                if (
+                    self.kernel_img[position - 1] != 0
+                    or tokens[ord('a') - ord('0') : ord('z') - ord('0') + 1]
+                    != letters
+                ):
+                    continue
+
                 candidates_offsets.append(position)
 
                 if self.kernel_img[pos : pos + 1].isalnum():
