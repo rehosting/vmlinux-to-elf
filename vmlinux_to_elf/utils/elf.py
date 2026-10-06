@@ -556,8 +556,10 @@ class ElfSection:
         impersonal_section = cls(elf_file)
         impersonal_section.unserialize(data)
 
+        # Section types not listed in SH_TYPE (such as processor-specific
+        # ones) are kept as generic sections
         section_class = SECTION_TYPE_TO_CLASS.get(
-            SH_TYPE(impersonal_section.section_header.sh_type), ElfSection
+            impersonal_section.section_header.sh_type, ElfSection
         )
 
         data.seek(section_header_offset)
