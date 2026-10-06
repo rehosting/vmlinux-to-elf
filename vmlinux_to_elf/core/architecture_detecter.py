@@ -204,6 +204,10 @@ class ArchitectureDetector:
         architecture_guess = cls._guess_architecture_special(binary)
         if not architecture_guess:
             architecture_guess = cls._guess_architecture_common(binary)
+        if not architecture_guess:
+            architecture_guess = cls._guess_architecture_from_elf_header(
+                binary
+            )
 
         if not architecture_guess:
             raise ArchitectureGuessError(
@@ -254,3 +258,32 @@ class ArchitectureDetector:
         )
 
         return None if number_of_prologues < 100 else best_architecture_guess
+
+    """
+        Guess the architecture from the header of an ELF input, when
+        too few function prologues were found
+    """
+
+    @staticmethod
+    def _guess_architecture_from_elf_header(
+        binary: bytes,
+    ) -> Optional[ArchitectureName]:
+        if binary[:4] != b'\x7fELF':
+            return None
+
+        is_64_bit = binary[4] == 2  # EI_CLASS is ELFCLASS64
+        is_big_endian = binary[5] == 2  # EI_DATA is ELFDATA2MSB
+        elf_machine = int.from_bytes(
+            binary[18:20], 'big' if is_big_endian else 'little'
+        )
+
+        for architecture in ArchitectureName:
+            result = ArchitectureDetectionResult(architecture)
+            if (
+                result.elf_machine == elf_machine
+                and result.is_64_bit == is_64_bit
+                and result.is_big_endian == is_big_endian
+            ):
+                return architecture
+
+        return None
