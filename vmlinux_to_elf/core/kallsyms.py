@@ -1130,6 +1130,8 @@ class KallsymsFinder:
                 position = self.kernel_img.rfind(
                     b'\x00' * table_element_size, 0, position
                 )
+                if position == -1:  # Try the next table element size
+                    break
                 position -= position % table_element_size
                 entries = unpack_from(
                     endianness_marker + '4' + long_size_marker,
