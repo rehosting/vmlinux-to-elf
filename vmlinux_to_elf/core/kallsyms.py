@@ -268,6 +268,9 @@ class KallsymsFinder:
         if self.kernel_text_candidate is None:
             self.infer_base_address_from_syms()
 
+        if self.explicit_base_address is None:
+            self.check_base_holds_text()
+
     def preprocess_uimage_header(self):
 
         # Parse uImage header magic (always big-endian)
@@ -397,6 +400,36 @@ class KallsymsFinder:
                 '[+] Guessed the base address using the '
                 + f'first_symbol_virtual_address fallback heuristic ({self.kernel_text_candidate:x})'
             )
+
+    def check_base_holds_text(self):
+        """
+            The image starts at the base address, so the kernel's own text
+            start must fall inside it. Guesses from kallsyms_relative_base
+            or from the arm64 relocation offsets can miss (an arm64 5.4
+            Image came out at 0xfffffffffd200000 with _stext at
+            0xffffffc010080800); rebase on _text (or _head), where an Image
+            starts, or else on _stext rounded down to a page.
+        """
+
+        def address(name):
+            symbol = self.name_to_symbol.get(name)
+            return symbol.virtual_address if symbol else None
+
+        text = address('_stext') or address('_text')
+        size = len(self.kernel_img)
+        base = self.kernel_text_candidate
+        if text is None or base <= text < base + size:
+            return
+
+        candidate = address('_text') or address('_head')
+        how = '_text/_head'
+        if candidate is None or not candidate <= text < candidate + size:
+            candidate, how = text & ~0xFFF, '_stext rounded down to a page'
+        logging.warning(
+            f'[!] Base address {base:x} does not hold the kernel text '
+            + f'start ({text:x}); using {candidate:x} ({how})'
+        )
+        self.kernel_text_candidate = candidate
 
     def find_linux_kernel_version(self):
         regex_match = search(
