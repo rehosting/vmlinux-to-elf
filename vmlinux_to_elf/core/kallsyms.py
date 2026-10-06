@@ -165,6 +165,7 @@ class KallsymsFinder:
     # Inferred information
 
     architecture: ArchitectureName = None
+    architecture_guess_error: Optional[ArchitectureGuessError] = None
 
     elf_machine: int = None
     is_64_bits: int = None  # Can be set manually
@@ -256,6 +257,9 @@ class KallsymsFinder:
             self.find_kallsyms_names()
 
         self.find_kallsyms_num_syms()
+
+        if self.architecture_guess_error:
+            raise self.architecture_guess_error
 
         if self.is_64_bits and not self.is_relocated:
             self.find_elf64_rela()
@@ -431,9 +435,11 @@ class KallsymsFinder:
             result: ArchitectureDetectionResult = ArchitectureDetector.guess(
                 self.kernel_img
             )
-        except ArchitectureGuessError:
+        except ArchitectureGuessError as error:
             if self.is_64_bits is None:
-                raise
+                # Raised once kallsyms is found, so that a missing
+                # kallsyms is reported first as the more relevant error
+                self.architecture_guess_error = error
         else:
             self.architecture: ArchitectureName = result.architecture_name
 
