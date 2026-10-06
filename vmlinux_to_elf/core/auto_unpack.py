@@ -7,7 +7,7 @@ from binascii import crc32
 from struct import unpack
 from enum import Enum
 from time import time
-from re import search
+from re import Match, finditer, search
 import importlib
 import logging
 
@@ -70,6 +70,32 @@ class Signature(Enum):
     @staticmethod
     def check(data, offset, sign):
         return sign.value == data[offset : offset + len(sign.value)]
+
+
+"""
+    Find the kernel version banner ("linux_banner" in init/version.c),
+    which reads "Linux version <release> (<user>@<host>) (<compiler>)
+    <version>". Copies of it may also be present in log or
+    documentation text (in which case they are preceded by other text
+    on the same line, like a printk timestamp), so prefer a banner
+    which isn't, then any well-formed banner, then any version string.
+"""
+
+LINUX_VERSION_REGEX = rb'Linux version (\d+\.[\d.]*\d)[ -~]+'
+LINUX_BANNER_REGEX = (
+    rb'Linux version (\d+\.\d+(?:\.\d+)+)[!-~]* \([!-~]*@[ -~]*?\) \([ -~]+'
+)
+
+
+def find_linux_version(data: bytes) -> Optional[Match]:
+    first_banner = None
+
+    for banner in finditer(LINUX_BANNER_REGEX, data):
+        if banner.start() == 0 or not 0x20 <= data[banner.start() - 1] < 0x7F:
+            return banner
+        first_banner = first_banner or banner
+
+    return first_banner or search(LINUX_VERSION_REGEX, data)
 
 
 KNOWN_COMPRESSION_SIGS = [
@@ -246,9 +272,7 @@ class VmlinuzDecompressor:
 
             # It didn't work. But did we get something usable yet?
 
-            kernel_is_usable = search(
-                rb'Linux version (\d+\.[\d.]*\d)[ -~]+', buf
-            )
+            kernel_is_usable = find_linux_version(buf)
 
             if kernel_is_usable:
                 # If yes, don't try more

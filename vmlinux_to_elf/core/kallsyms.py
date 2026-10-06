@@ -15,7 +15,7 @@ from vmlinux_to_elf.core.architecture_detecter import (
     ArchitectureGuessError,
     ArchitectureName,
 )
-from vmlinux_to_elf.core.auto_unpack import Signature
+from vmlinux_to_elf.core.auto_unpack import Signature, find_linux_version
 from vmlinux_to_elf.utils.elf import ElfFile
 from vmlinux_to_elf.kernel_db.database import (
     KernelVersion,
@@ -399,9 +399,7 @@ class KallsymsFinder:
             )
 
     def find_linux_kernel_version(self):
-        regex_match = search(
-            rb'Linux version (\d+\.[\d.]*\d)[ -~]+', self.kernel_img
-        )
+        regex_match = find_linux_version(self.kernel_img)
 
         if not regex_match:
             raise ValueError('No version string found in this kernel')
