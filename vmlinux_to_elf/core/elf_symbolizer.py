@@ -73,6 +73,9 @@ class ElfSymbolizer:
             # extra_info,
         )
 
+        # (the kernel may not start at the beginning of the image)
+        file_contents = file_contents[kallsyms_finder.image_start_offset :]
+
         if elf_machine is None and not kallsyms_finder.elf_machine:
             raise ArchitectureGuessError(
                 'The architecture could not be guessed successfully'
