@@ -285,12 +285,25 @@ class ElfFile:
         else:
             # Remember about the string symbol table section
 
-            self.section_string_table = self.sections[
+            shstrndx = (
                 self.file_header.e_shstrndx
                 if self.file_header.e_shstrndx
                 != SPECIAL_SECTION_INDEX.SHN_XINDEX
                 else self.sections[0].sh_link
-            ]
+            )
+
+            # The section name string table may be absent (SHN_UNDEF)
+            # or invalid: in this case, leave sections unnamed, and
+            # create a new one for serializing
+
+            has_section_names = shstrndx < len(self.sections) and isinstance(
+                self.sections[shstrndx], ElfStrtab
+            )
+
+            if has_section_names:
+                self.section_string_table = self.sections[shstrndx]
+            else:
+                self.section_string_table = ElfStrtab(self)
 
             # Name sections and link relocations (now that string and symbol tables are parsed)
 
@@ -299,6 +312,10 @@ class ElfFile:
 
                 if section.section_header.sh_type == SH_TYPE.SHT_SYMTAB:
                     self.symbol_table = section
+
+            if not has_section_names:
+                self.section_string_table.section_name = '.shstrtab'
+                self.sections.append(self.section_string_table)
 
     def serialize(self, data: BytesIO):
         # Filter out .gnu.version not to confuse readelf for now TODO
@@ -556,8 +573,10 @@ class ElfSection:
         impersonal_section = cls(elf_file)
         impersonal_section.unserialize(data)
 
+        # Section types not listed in SH_TYPE (such as processor-specific
+        # ones) are kept as generic sections
         section_class = SECTION_TYPE_TO_CLASS.get(
-            SH_TYPE(impersonal_section.section_header.sh_type), ElfSection
+            impersonal_section.section_header.sh_type, ElfSection
         )
 
         data.seek(section_header_offset)
