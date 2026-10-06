@@ -70,7 +70,9 @@ architecture_to_prologue_regex: dict[ArchitectureName, bytes] = {
     ArchitectureName.mipsbe: rb'\x27\xBD\xFF.\xAF[\xA0-\xBF]..',
     ArchitectureName.mips64le: rb'.\xFF\xBD\x67..[\xA0-\xBF]\xFF',
     ArchitectureName.mips64be: rb'\x67\xBD\xFF.\xFF[\xA0-\xBF]..',
-    ArchitectureName.x86: rb'\x55\x89\xE5(?:\x83\xEC|\x57\x56)',
+    # "push ebp; mov ebp, esp", or "push edi; push esi; push ebx" for
+    # kernels built without frame pointers
+    ArchitectureName.x86: rb'\x55\x89\xE5(?:\x83\xEC|\x57\x56)|\x57\x56\x53',
     ArchitectureName.x86_64: rb'\x55\x48\x89\xE5',
     ArchitectureName.powerpcbe: rb'\x7C\x08\x02\xA6',
     ArchitectureName.powerpcle: rb'\xA6\x02\x08\x7C',
@@ -207,6 +209,10 @@ class ArchitectureDetector:
         architecture_guess = cls._guess_architecture_special(binary)
         if not architecture_guess:
             architecture_guess = cls._guess_architecture_common(binary)
+        if not architecture_guess:
+            architecture_guess = cls._guess_architecture_from_elf_header(
+                binary
+            )
 
         if not architecture_guess:
             raise ArchitectureGuessError(
@@ -257,3 +263,32 @@ class ArchitectureDetector:
         )
 
         return None if number_of_prologues < 100 else best_architecture_guess
+
+    """
+        Guess the architecture from the header of an ELF input, when
+        too few function prologues were found
+    """
+
+    @staticmethod
+    def _guess_architecture_from_elf_header(
+        binary: bytes,
+    ) -> Optional[ArchitectureName]:
+        if binary[:4] != b'\x7fELF':
+            return None
+
+        is_64_bit = binary[4] == 2  # EI_CLASS is ELFCLASS64
+        is_big_endian = binary[5] == 2  # EI_DATA is ELFDATA2MSB
+        elf_machine = int.from_bytes(
+            binary[18:20], 'big' if is_big_endian else 'little'
+        )
+
+        for architecture in ArchitectureName:
+            result = ArchitectureDetectionResult(architecture)
+            if (
+                result.elf_machine == elf_machine
+                and result.is_64_bit == is_64_bit
+                and result.is_big_endian == is_big_endian
+            ):
+                return architecture
+
+        return None
