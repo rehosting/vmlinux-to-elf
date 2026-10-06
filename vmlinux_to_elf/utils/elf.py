@@ -1025,6 +1025,11 @@ class ElfRel(ElfSection):
     def post_unserialize(self):
         super().post_unserialize()
 
+        # (a stripped file may keep relocations, such as ".rel.dyn",
+        # without a symbol table: keep them as they are)
+        if not self.section_header.sh_link and not self.elf_file.symbol_table:
+            return
+
         self.symtab_section = self.elf_file.sections[
             self.section_header.sh_link
             or self.elf_file.sections.index(self.elf_file.symbol_table)
@@ -1045,6 +1050,8 @@ class ElfRel(ElfSection):
         super().pre_serialize()
 
         for relocation in self.relocation_table:
+            if relocation.associated_symbol is None:
+                continue
             relocation.r_info_sym = self.symtab_section.symbol_table.index(
                 relocation.associated_symbol
             )
@@ -1095,6 +1102,11 @@ class ElfRela(ElfSection):
 
     def post_unserialize(self):
         super().post_unserialize()
+
+        # (a stripped file may keep relocations, such as ".rel.dyn",
+        # without a symbol table: keep them as they are)
+        if not self.section_header.sh_link and not self.elf_file.symbol_table:
+            return
 
         self.symtab_section = self.elf_file.sections[
             self.section_header.sh_link
