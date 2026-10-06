@@ -1142,7 +1142,7 @@ class KallsymsFinder:
                 for i in range(1, len(entries)):
                     # kallsyms_names entries are at least 2 bytes and at most 0x3FFF bytes long
                     if (
-                        entries[i - 1] + 0x200 >= entries[i]
+                        entries[i - 1] + 0x200 > entries[i]
                         or entries[i - 1] + 0x40000 < entries[i]
                     ):
                         break
@@ -1185,7 +1185,7 @@ class KallsymsFinder:
         for i in range(1, len(kallsyms_markers_entries)):
             curr = kallsyms_markers_entries[i]
             last = kallsyms_markers_entries[i - 1]
-            if last + 0x200 >= curr or last + 0x40000 < curr:
+            if last + 0x200 > curr or last + 0x40000 < curr:
                 kallsyms_markers_entries = kallsyms_markers_entries[:i]
                 break
 
