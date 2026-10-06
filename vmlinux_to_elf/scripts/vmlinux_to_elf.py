@@ -95,7 +95,7 @@ def main():
             + 'auto-detection'
         )
 
-        exit()
+        exit(1)
 
     with open(args.input_file, 'rb') as kernel_bin:
         try:
@@ -119,7 +119,7 @@ def main():
                 + 'arguments manually (use --help for their precise specification).'
             )
 
-            exit()
+            exit(1)
 
 
 if __name__ == '__main__':

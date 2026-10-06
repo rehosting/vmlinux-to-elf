@@ -75,7 +75,10 @@ architecture_to_prologue_regex: dict[ArchitectureName, bytes] = {
     ArchitectureName.powerpcbe: rb'\x7C\x08\x02\xA6',
     ArchitectureName.powerpcle: rb'\xA6\x02\x08\x7C',
     ArchitectureName.armbe: rb'\xE9\x2D..(?:[\xE0-\xEF]...){2}',
-    ArchitectureName.armle: rb'\x2D\xE9(?:...[\xE0-\xEF]){2}',
+    # ARM-mode "stmfd sp!, {...}", or Thumb-2 (CONFIG_THUMB2_KERNEL)
+    # "push.w {..., lr}" (0xe92d then a register list with lr set and
+    # sp/pc clear), whose halfwords are stored little-endian
+    ArchitectureName.armle: rb'\x2D\xE9(?:(?:...[\xE0-\xEF]){2}|.[\x40-\x5F])',
     ArchitectureName.mips16e: rb'\xf0\x08\x64.\x01.',
     ArchitectureName.superhle: rb'\xF6\x69\x0B\x00\xF6\x68',  # This is an epilogue
     ArchitectureName.superhbe: rb'\x69\xF6\x00\x0B\x68\xF6',  # This is an epilogue

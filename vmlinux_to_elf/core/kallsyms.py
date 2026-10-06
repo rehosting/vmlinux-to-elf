@@ -17,7 +17,7 @@ from vmlinux_to_elf.core.architecture_detecter import (
     ArchitectureGuessError,
     ArchitectureName,
 )
-from vmlinux_to_elf.core.auto_unpack import Signature
+from vmlinux_to_elf.core.auto_unpack import Signature, find_linux_version
 from vmlinux_to_elf.utils.elf import ElfFile
 from vmlinux_to_elf.kernel_db.database import (
     KernelVersion,
@@ -167,6 +167,7 @@ class KallsymsFinder:
     # Inferred information
 
     architecture: ArchitectureName = None
+    architecture_guess_error: Optional[ArchitectureGuessError] = None
 
     elf_machine: int = None
     is_64_bits: int = None  # Can be set manually
@@ -264,6 +265,9 @@ class KallsymsFinder:
             self.find_kallsyms_names()
 
         self.find_kallsyms_num_syms()
+
+        if self.architecture_guess_error:
+            raise self.architecture_guess_error
 
         if self.is_64_bits and not self.is_relocated:
             self.find_elf64_rela()
@@ -407,9 +411,7 @@ class KallsymsFinder:
             )
 
     def find_linux_kernel_version(self):
-        regex_match = search(
-            rb'Linux version (\d+\.[\d.]*\d)[ -~]+', self.kernel_img
-        )
+        regex_match = find_linux_version(self.kernel_img)
 
         if not regex_match:
             raise ValueError('No version string found in this kernel')
@@ -439,9 +441,11 @@ class KallsymsFinder:
             result: ArchitectureDetectionResult = ArchitectureDetector.guess(
                 self.kernel_img
             )
-        except ArchitectureGuessError:
+        except ArchitectureGuessError as error:
             if self.is_64_bits is None:
-                raise
+                # Raised once kallsyms is found, so that a missing
+                # kallsyms is reported first as the more relevant error
+                self.architecture_guess_error = error
         else:
             self.architecture: ArchitectureName = result.architecture_name
 
@@ -743,6 +747,9 @@ class KallsymsFinder:
         kallsyms_begin = self.kallsyms_num_syms__offset
         kallsyms_end = self.kallsyms_token_index_end__offset
 
+        if self.uncompressed_kallsyms:  # There is no kallsyms_token_index
+            kallsyms_end = self.kallsyms_markers__offset
+
         # There is no guarantee that relocation addresses are monotonous
 
         count = 0
@@ -825,6 +832,21 @@ class KallsymsFinder:
                 if self.kernel_img[pos : pos + len(seq)] == seq:
                     break
             else:
+                # The token before "0" is null-terminated, and the tokens
+                # for [a-z] are always present at their own positions
+
+                tokens = self.kernel_img[position : position + 50 * 75].split(
+                    b'\0', ord('z') - ord('0') + 1
+                )
+                letters = [b'%c' % i for i in range(ord('a'), ord('z') + 1)]
+
+                if (
+                    self.kernel_img[position - 1] != 0
+                    or tokens[ord('a') - ord('0') : ord('z') - ord('0') + 1]
+                    != letters
+                ):
+                    continue
+
                 candidates_offsets.append(position)
 
                 if self.kernel_img[pos : pos + 1].isalnum():
@@ -1022,6 +1044,12 @@ class KallsymsFinder:
 
         self.end_of_kallsyms_names_uncompressed = position
 
+        # The match may start after the first symbols (whose names didn't
+        # match the regex above), so the actual start of kallsyms_names,
+        # which is aligned, is searched backwards from an aligned offset
+
+        self.kallsyms_names__offset -= self.kallsyms_names__offset % 4
+
     def find_kallsyms_markers_uncompressed(self):
         """
         This is the OpenWRT-specific version of the
@@ -1127,7 +1155,12 @@ class KallsymsFinder:
         The first index is always 0, it is sorted, and it is aligned.
         """
 
-        # Try possible sizes for the table element (long type)
+        # Try possible sizes for the table element (long type), and
+        # keep the match closest to kallsyms_token_table, which directly
+        # follows kallsyms_markers (a match for a wrong size may be found
+        # further away)
+        candidates = []
+
         for table_element_size in (8, 4, 2):
             position = self.kallsyms_token_table__offset
             endianness_marker = '>' if self.is_big_endian else '<'
@@ -1138,6 +1171,8 @@ class KallsymsFinder:
                 position = self.kernel_img.rfind(
                     b'\x00' * table_element_size, 0, position
                 )
+                if position == -1:  # Try the next table element size
+                    break
                 position -= position % table_element_size
                 entries = unpack_from(
                     endianness_marker + '4' + long_size_marker,
@@ -1150,19 +1185,24 @@ class KallsymsFinder:
                 for i in range(1, len(entries)):
                     # kallsyms_names entries are at least 2 bytes and at most 0x3FFF bytes long
                     if (
-                        entries[i - 1] + 0x200 >= entries[i]
+                        entries[i - 1] + 0x200 > entries[i]
                         or entries[i - 1] + 0x40000 < entries[i]
                     ):
                         break
                 else:
-                    logging.info(
-                        '[+] Found kallsyms_markers at file offset 0x%08x'
-                        % position
-                    )
-                    self.kallsyms_markers__offset = position
-                    self.offset_table_element_size = table_element_size
-                    return
-        raise ValueError('Could not find kallsyms_markers')
+                    candidates.append((position, table_element_size))
+                    break
+
+        if not candidates:
+            raise ValueError('Could not find kallsyms_markers')
+
+        position, table_element_size = max(candidates)
+
+        logging.info(
+            '[+] Found kallsyms_markers at file offset 0x%08x' % position
+        )
+        self.kallsyms_markers__offset = position
+        self.offset_table_element_size = table_element_size
 
     def find_kallsyms_names(self):
         position = self.kallsyms_markers__offset
@@ -1193,7 +1233,7 @@ class KallsymsFinder:
         for i in range(1, len(kallsyms_markers_entries)):
             curr = kallsyms_markers_entries[i]
             last = kallsyms_markers_entries[i - 1]
-            if last + 0x200 >= curr or last + 0x40000 < curr:
+            if last + 0x200 > curr or last + 0x40000 < curr:
                 kallsyms_markers_entries = kallsyms_markers_entries[:i]
                 break
 
@@ -1322,11 +1362,23 @@ class KallsymsFinder:
                 endianness_marker + long_size_marker, num_symbols
             )
 
-            needle = self.kernel_img.rfind(
-                encoded_num_symbols,
-                max(0, self.kallsyms_names__offset - MAX_ALIGNMENT - 20),
-                self.kallsyms_names__offset,
-            )
+            # kallsyms_num_syms is aligned like the kallsyms_markers
+            # entries, so skip matches which aren't
+
+            search_end = self.kallsyms_names__offset
+
+            while True:
+                needle = self.kernel_img.rfind(
+                    encoded_num_symbols,
+                    max(0, self.kallsyms_names__offset - MAX_ALIGNMENT - 20),
+                    search_end,
+                )
+                if (
+                    needle == -1
+                    or needle % self.offset_table_element_size == 0
+                ):
+                    break
+                search_end = needle + len(encoded_num_symbols) - 1
 
             if (
                 needle == -1
