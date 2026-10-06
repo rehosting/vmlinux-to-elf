@@ -71,6 +71,14 @@ def main():
     )
 
     args.add_argument(
+        '--split-sections',
+        help='Cut the kernel into head/text/rodata/init/data sections at '
+        + 'its linker symbols (rather than one ".kernel" section) and size '
+        + 'every symbol up to the next one in its section',
+        action='store_true',
+    )
+
+    args.add_argument(
         '--use-absolute',
         help='Assume kallsyms offsets are absolute addresses',
         action='store_true',
@@ -110,6 +118,7 @@ def main():
                 args.file_offset,
                 args.use_absolute,
                 # args.extra_info,
+                split_sections=args.split_sections,
             )
 
         except ArchitectureGuessError:
