@@ -280,24 +280,49 @@ class VmlinuzDecompressor:
 
             else:
                 # If not successful, scan for compression signatures in
-                # the whole document
+                # the whole document. Prefer a stream which contains a
+                # kernel version banner, as a firmware may contain many
+                # unrelated compressed streams; else, take the first
+                # stream which decompressed (it may contain a nested
+                # compressed kernel)
+
+                first_decompressed = None
 
                 for possible_signature in KNOWN_COMPRESSION_SIGS:
                     possible_offset = buf.find(possible_signature.value)
 
                     while possible_offset > -1:
+                        operations_before = len(self.operations_done)
                         decompressed_data = self._try_decompress_at(
-                            buf, possible_offset
+                            buf, possible_offset, log=False
                         )
                         if decompressed_data:
-                            buf = decompressed_data
-                            found_anything = True
-                            break
+                            operations = self.operations_done[
+                                operations_before:
+                            ]
+                            del self.operations_done[operations_before:]
+
+                            if search(LINUX_BANNER_REGEX, decompressed_data):
+                                buf = self._commit(
+                                    decompressed_data, operations
+                                )
+                                found_anything = True
+                                break
+
+                            if not first_decompressed:
+                                first_decompressed = (
+                                    decompressed_data,
+                                    operations,
+                                )
                         possible_offset = buf.find(
                             possible_signature.value, possible_offset + 1
                         )
                     if found_anything:
                         break
+
+                if first_decompressed and not found_anything:
+                    buf = self._commit(*first_decompressed)
+                    found_anything = True
 
             if not found_anything:
                 break
@@ -314,12 +339,22 @@ class VmlinuzDecompressor:
 
         return buf
 
+    def _commit(
+        self, decompressed: bytes, operations: List[DecompressOperation]
+    ) -> bytes:
+        for op in operations:
+            logging.info('[+] ' + str(op))
+        self.operations_done += operations
+        return decompressed
+
     """
         Try to decompress a file at a given offset, without
         knowing the compression algorithm
     """
 
-    def _try_decompress_at(self, input_file: bytes, offset: int) -> bytes:
+    def _try_decompress_at(
+        self, input_file: bytes, offset: int, log: bool = True
+    ) -> bytes:
 
         op = DecompressOperation()
         op.src_size = len(input_file)
@@ -417,7 +452,7 @@ class VmlinuzDecompressor:
                 # Also try to re-unpack the output image in the case where the nested
                 # kernel would start with a "UNCOMPRESSED_IMG" Qualcomm magic, for example
 
-                decoded = self._try_decompress_at(decoded, 0) or decoded
+                decoded = self._try_decompress_at(decoded, 0, log) or decoded
 
             elif (
                 Signature.check(input_file, offset, Signature.uImage)
@@ -425,7 +460,7 @@ class VmlinuzDecompressor:
                 and input_file[offset + 31] != 0
             ):  # legacy_img_hdr->ih_comp != IH_COMP_NONE
                 decompressed = self._try_decompress_at(
-                    input_file, offset + 0x40
+                    input_file, offset + 0x40, log
                 )
 
                 if decompressed:
@@ -551,7 +586,8 @@ class VmlinuzDecompressor:
             op.op_time_secs = time() - begin_time
             op.dst_size = len(decoded)
 
-            logging.info('[+] ' + str(op))
+            if log:
+                logging.info('[+] ' + str(op))
             self.operations_done.append(op)
 
             return decoded
