@@ -70,7 +70,9 @@ architecture_to_prologue_regex: dict[ArchitectureName, bytes] = {
     ArchitectureName.mipsbe: rb'\x27\xBD\xFF.\xAF[\xA0-\xBF]..',
     ArchitectureName.mips64le: rb'.\xFF\xBD\x67..[\xA0-\xBF]\xFF',
     ArchitectureName.mips64be: rb'\x67\xBD\xFF.\xFF[\xA0-\xBF]..',
-    ArchitectureName.x86: rb'\x55\x89\xE5(?:\x83\xEC|\x57\x56)',
+    # "push ebp; mov ebp, esp", or "push edi; push esi; push ebx" for
+    # kernels built without frame pointers
+    ArchitectureName.x86: rb'\x55\x89\xE5(?:\x83\xEC|\x57\x56)|\x57\x56\x53',
     ArchitectureName.x86_64: rb'\x55\x48\x89\xE5',
     ArchitectureName.powerpcbe: rb'\x7C\x08\x02\xA6',
     ArchitectureName.powerpcle: rb'\xA6\x02\x08\x7C',
