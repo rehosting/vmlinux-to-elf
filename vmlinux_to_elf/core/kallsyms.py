@@ -1314,11 +1314,23 @@ class KallsymsFinder:
                 endianness_marker + long_size_marker, num_symbols
             )
 
-            needle = self.kernel_img.rfind(
-                encoded_num_symbols,
-                max(0, self.kallsyms_names__offset - MAX_ALIGNMENT - 20),
-                self.kallsyms_names__offset,
-            )
+            # kallsyms_num_syms is aligned like the kallsyms_markers
+            # entries, so skip matches which aren't
+
+            search_end = self.kallsyms_names__offset
+
+            while True:
+                needle = self.kernel_img.rfind(
+                    encoded_num_symbols,
+                    max(0, self.kallsyms_names__offset - MAX_ALIGNMENT - 20),
+                    search_end,
+                )
+                if (
+                    needle == -1
+                    or needle % self.offset_table_element_size == 0
+                ):
+                    break
+                search_end = needle + len(encoded_num_symbols) - 1
 
             if (
                 needle == -1
