@@ -1119,7 +1119,12 @@ class KallsymsFinder:
         The first index is always 0, it is sorted, and it is aligned.
         """
 
-        # Try possible sizes for the table element (long type)
+        # Try possible sizes for the table element (long type), and
+        # keep the match closest to kallsyms_token_table, which directly
+        # follows kallsyms_markers (a match for a wrong size may be found
+        # further away)
+        candidates = []
+
         for table_element_size in (8, 4, 2):
             position = self.kallsyms_token_table__offset
             endianness_marker = '>' if self.is_big_endian else '<'
@@ -1149,14 +1154,19 @@ class KallsymsFinder:
                     ):
                         break
                 else:
-                    logging.info(
-                        '[+] Found kallsyms_markers at file offset 0x%08x'
-                        % position
-                    )
-                    self.kallsyms_markers__offset = position
-                    self.offset_table_element_size = table_element_size
-                    return
-        raise ValueError('Could not find kallsyms_markers')
+                    candidates.append((position, table_element_size))
+                    break
+
+        if not candidates:
+            raise ValueError('Could not find kallsyms_markers')
+
+        position, table_element_size = max(candidates)
+
+        logging.info(
+            '[+] Found kallsyms_markers at file offset 0x%08x' % position
+        )
+        self.kallsyms_markers__offset = position
+        self.offset_table_element_size = table_element_size
 
     def find_kallsyms_names(self):
         position = self.kallsyms_markers__offset
