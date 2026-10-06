@@ -163,6 +163,7 @@ class KallsymsFinder:
 
     kernel_img: bytes = None
     is_relocated: bool = False
+    image_start_offset: int = 0  # Bytes removed from the start of the image
 
     # Inferred information
 
@@ -261,6 +262,7 @@ class KallsymsFinder:
                 raise first_error
 
         else:
+            self.remove_misaligned_image_start()
             self.find_kallsyms_markers()
             self.find_kallsyms_names()
 
@@ -896,6 +898,14 @@ class KallsymsFinder:
                     )
 
         position += 1
+
+        # If the kernel doesn't start at an aligned offset in the image,
+        # the table may start at any of the next bytes, as the end of
+        # kallsyms_markers may also have been walked over
+        self.kallsyms_token_table__other_offsets = [
+            position + i for i in range(8) if (position + i) % 4
+        ]
+
         position += -position % 4
 
         self.kallsyms_token_table__offset = position
@@ -959,6 +969,12 @@ class KallsymsFinder:
         found_position_for_be_value = memory_to_search.find(big_endian_offsets)
 
         if found_position_for_le_value == found_position_for_be_value == -1:
+            if self.kallsyms_token_table__other_offsets:
+                self.kallsyms_token_table__offset = (
+                    self.kallsyms_token_table__other_offsets.pop(0)
+                )
+                return self.find_kallsyms_token_index()
+
             raise ValueError('The value of kallsyms_token_index was not found')
 
         elif found_position_for_le_value > found_position_for_be_value:
@@ -983,6 +999,33 @@ class KallsymsFinder:
             '[+] Found kallsyms_token_index at file offset 0x%08x'
             % self.kallsyms_token_index__offset
         )
+
+    def remove_misaligned_image_start(self):
+        """
+        kallsyms_token_index is aligned like a long (see "ALGN" in
+        "scripts/kallsyms.c"). If it isn't aligned in the image, the
+        kernel doesn't start at an aligned offset in it (for example
+        after a vendor header, or inside a firmware image). Remove the
+        extra bytes at the start, as with "--file-offset", since the
+        other tables are searched at aligned offsets.
+        """
+
+        if self.kernel_img.startswith(b'\x7fELF'):
+            return
+
+        alignment = 8 if self.is_64_bits else 4
+        self.image_start_offset = self.kallsyms_token_index__offset % alignment
+
+        if self.image_start_offset:
+            logging.info(
+                '[+] Skipping %d bytes at the start of the image, where '
+                'the kernel is not aligned' % self.image_start_offset
+            )
+
+            self.kernel_img = self.kernel_img[self.image_start_offset :]
+            self.kallsyms_token_table__offset -= self.image_start_offset
+            self.kallsyms_token_index__offset -= self.image_start_offset
+            self.kallsyms_token_index_end__offset -= self.image_start_offset
 
     def find_kallsyms_names_uncompressed(self):
         """
