@@ -1017,6 +1017,12 @@ class KallsymsFinder:
 
         self.end_of_kallsyms_names_uncompressed = position
 
+        # The match may start after the first symbols (whose names didn't
+        # match the regex above), so the actual start of kallsyms_names,
+        # which is aligned, is searched backwards from an aligned offset
+
+        self.kallsyms_names__offset -= self.kallsyms_names__offset % 4
+
     def find_kallsyms_markers_uncompressed(self):
         """
         This is the OpenWRT-specific version of the
