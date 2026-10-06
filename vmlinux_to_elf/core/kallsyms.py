@@ -9,6 +9,8 @@ from struct import pack, unpack_from
 from io import StringIO, BytesIO
 from typing import Optional
 
+from peewee import PeeweeException
+
 from vmlinux_to_elf.core.architecture_detecter import (
     ArchitectureDetectionResult,
     ArchitectureDetector,
@@ -233,7 +235,13 @@ class KallsymsFinder:
 
         self.guess_architecture()
 
-        self.extract_db_information()
+        try:
+            self.extract_db_information()
+        except PeeweeException as error:
+            # The database only provides informational hints
+            logging.warning(
+                '[!] Could not read the kernel database: %s' % error
+            )
 
         # -
 

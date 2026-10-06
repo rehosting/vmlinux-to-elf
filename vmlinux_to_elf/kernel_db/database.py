@@ -2,6 +2,7 @@
 # -*- encoding: Utf-8 -*-
 
 from os.path import dirname, realpath
+from urllib.request import pathname2url
 
 from peewee import (
     SqliteDatabase,
@@ -19,7 +20,12 @@ from peewee import (
 DB_FOLDER = dirname(realpath(__file__))
 DB_PATH = realpath(DB_FOLDER + '/database.sqlite3')
 
-db = SqliteDatabase(DB_PATH)
+# The database is only ever read: open it as immutable so that no lock
+# or journal file is created next to it (which fails on read-only
+# installs and contends between concurrent runs on network filesystems)
+db = SqliteDatabase(
+    'file:%s?mode=ro&immutable=1' % pathname2url(DB_PATH), uri=True
+)
 
 
 class Base(Model):
@@ -103,5 +109,3 @@ class DebianRelease(Base):
     debian_version_number = TextField(index=True)
     debian_release_date = DateField(index=True)
 
-
-db.connect()
