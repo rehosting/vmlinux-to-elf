@@ -735,6 +735,9 @@ class KallsymsFinder:
         kallsyms_begin = self.kallsyms_num_syms__offset
         kallsyms_end = self.kallsyms_token_index_end__offset
 
+        if self.uncompressed_kallsyms:  # There is no kallsyms_token_index
+            kallsyms_end = self.kallsyms_markers__offset
+
         # There is no guarantee that relocation addresses are monotonous
 
         count = 0
