@@ -6,6 +6,7 @@ from io import BytesIO
 from vmlinux_to_elf.core.architecture_detecter import ArchitectureGuessError
 from vmlinux_to_elf.core.kallsyms import KallsymsFinder, KallsymsSymbolType
 from vmlinux_to_elf.core.auto_unpack import Signature
+from vmlinux_to_elf.core import sections as sections_mod
 from vmlinux_to_elf.utils.elf import (
     SH_FLAGS,
     SPECIAL_SECTION_INDEX,
@@ -49,7 +50,16 @@ class ElfSymbolizer:
         file_offset: int = None,
         override_relative: bool = None,
         # extra_info: bool = False,
+        split_sections: bool = False,
     ):
+        """
+            split_sections: cut the raw kernel into head/text/rodata/init/
+            data sections at its linker symbols (core.sections) instead of
+            one RWX ".kernel", and give every symbol the size of the gap to
+            the next symbol in its section, typed FUNC in executable sections
+            and OBJECT elsewhere. For an ELF input, its own sections are kept
+            and only the symbols are sized and typed that way.
+        """
 
         if file_contents.startswith(
             Signature.uImage.value
@@ -173,6 +183,11 @@ class ElfSymbolizer:
 
             kernel.sections += [bss]
 
+            if split_sections:
+                self.split_kernel_sections(
+                    kernel, kallsyms_finder, file_contents, bss
+                )
+
         r"""
             Find the entry point symbol. Based on executing this command
             on the Linux tree source:
@@ -251,6 +266,22 @@ class ElfSymbolizer:
             (True, True): Elf64BigEndianSymbolTableEntry,
         }[(kernel.is_big_endian, kernel.is_64_bits)]
 
+        symbol_sizes = {}
+        if split_sections:
+            symbol_sizes = sections_mod.symbol_sizes(
+                [symbol.virtual_address for symbol in kallsyms_finder.symbols],
+                [
+                    (
+                        section.section_header.sh_addr,
+                        section.section_header.sh_addr
+                        + section.section_header.sh_size,
+                    )
+                    for section in kernel.sections
+                    if section.section_header.sh_flags & SH_FLAGS.SHF_ALLOC
+                    and not isinstance(section, ElfNoBits)
+                ],
+            )
+
         for symbol in kallsyms_finder.symbols:
             elf_symbol = elf_symbol_class(
                 kernel.is_big_endian, kernel.is_64_bits
@@ -283,6 +314,20 @@ class ElfSymbolizer:
                 elf_symbol.associated_section = kernel.find_section(
                     symbol.virtual_address
                 )
+                if split_sections:
+                    elf_symbol.st_size = symbol_sizes.get(
+                        symbol.virtual_address, 0
+                    )
+                    section = elf_symbol.associated_section
+                    if section is not None and not isinstance(
+                        section, ElfNoBits
+                    ):
+                        elf_symbol.st_info_type = (
+                            ST_INFO_TYPE.STT_FUNC
+                            if section.section_header.sh_flags
+                            & SH_FLAGS.SHF_EXECINSTR
+                            else ST_INFO_TYPE.STT_OBJECT
+                        )
 
             symtab.symbol_table.append(elf_symbol)
 
@@ -326,3 +371,80 @@ class ElfSymbolizer:
 
         else:
             kernel.serialize(output_stream)
+
+    @staticmethod
+    def split_kernel_sections(kernel, kallsyms_finder, file_contents, bss):
+        """
+            Replace the ".kernel" PROGBITS section(s) of `kernel` by the
+            layout from core.sections, keeping any hole punched for an
+            arm64 relocation table.
+        """
+        old = [
+            section
+            for section in kernel.sections
+            if section.section_name in ('.kernel', '.kernel2')
+        ]
+        base = old[0].section_header.sh_addr
+        end = base + len(file_contents)
+        symbols = {
+            name: symbol.virtual_address
+            for name, symbol in kallsyms_finder.name_to_symbol.items()
+        }
+        try:
+            layout, bounds = sections_mod.kernel_sections(
+                symbols, base, end, kernel.file_header.e_machine
+            )
+        except sections_mod.SectionLayoutError as error:
+            logging.warning(
+                f'[!] Keeping a single .kernel section: {error}'
+            )
+            return
+
+        hole = None
+        if kallsyms_finder.elf64_rela:
+            hole = (
+                base + kallsyms_finder.elf64_rela_start,
+                base + kallsyms_finder.elf64_rela_end_excl,
+            )
+
+        flag_bits = {
+            'A': SH_FLAGS.SHF_ALLOC,
+            'W': SH_FLAGS.SHF_WRITE,
+            'X': SH_FLAGS.SHF_EXECINSTR,
+        }
+        new = []
+        for (name, start, stop, flags), (start_by, stop_by) in zip(
+            layout, bounds
+        ):
+            pieces = [(start, stop)]
+            if hole and start < hole[1] and hole[0] < stop:
+                pieces = [
+                    (a, b)
+                    for a, b in ((start, hole[0]), (hole[1], stop))
+                    if b > a
+                ]
+            for number, (a, b) in enumerate(pieces):
+                section = ElfProgbits(kernel)
+                section.section_name = name + (
+                    '.%d' % (number + 1) if number else ''
+                )
+                section.section_header.sh_flags = 0
+                for flag in flags:
+                    section.section_header.sh_flags |= flag_bits[flag]
+                section.section_header.sh_addr = a
+                section.section_header.sh_size = b - a
+                section.section_contents = bytearray(
+                    file_contents[a - base : b - base]
+                )
+                new.append(section)
+            logging.info(
+                f'[+] Section {name}: {start:x}-{stop:x} '
+                + f'({start_by} .. {stop_by})'
+            )
+
+        index = kernel.sections.index(old[0])
+        kernel.sections = [
+            section for section in kernel.sections if section not in old
+        ]
+        kernel.sections[index:index] = new
+        bss.section_header.sh_flags = SH_FLAGS.SHF_ALLOC | SH_FLAGS.SHF_WRITE
