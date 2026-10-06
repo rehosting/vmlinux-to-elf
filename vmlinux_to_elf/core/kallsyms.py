@@ -555,6 +555,24 @@ class KallsymsFinder:
                     )
                 )
 
+    @staticmethod
+    def is_kernel_rela(elf64_rela) -> bool:
+        """
+            The kernel's own R_AARCH64_RELATIVE entries patch kernel virtual
+            addresses (upper half). A run of small r_offsets is another
+            object's table, e.g. a PIE program in an embedded initramfs.
+        """
+        KERNEL_HALF = 0xFFFF000000000000
+        high = sum(1 for r_offset, _, _ in elf64_rela if r_offset >= KERNEL_HALF)
+        if high * 10 >= len(elf64_rela) * 9:
+            return True
+        logging.info(
+            '[-] Skipping a %d-entry R_AARCH64_RELATIVE table whose offsets are '
+            'not kernel addresses (another object, e.g. in an initramfs)'
+            % len(elf64_rela)
+        )
+        return False
+
     def find_elf64_rela(self):
         """
         Find relocations table, return True if success, False
@@ -609,7 +627,11 @@ class KallsymsFinder:
                 # and maybe some others are between first few R_AARCH64_RELATIVE,
                 # which results in missing ~30 relocations
 
-                if len(elf64_rela) >= minimal_heuristic_count:
+                if len(
+                    elf64_rela
+                ) >= minimal_heuristic_count and self.is_kernel_rela(
+                    elf64_rela
+                ):
                     while (
                         self.kernel_img[
                             self.elf64_rela_start : self.elf64_rela_start
@@ -656,7 +678,9 @@ class KallsymsFinder:
 
         count = len(elf64_rela) + empty_entries
 
-        if count < minimal_heuristic_count:
+        if count < minimal_heuristic_count or not self.is_kernel_rela(
+            elf64_rela
+        ):
             return False
 
         self.elf64_rela = elf64_rela
