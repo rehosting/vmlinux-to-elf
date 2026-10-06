@@ -1035,7 +1035,15 @@ class KallsymsFinder:
         ):
             position += 1
 
-        for null_separated_bytes_chunks in range(20):
+        # (kallsyms_markers has one entry per 256 symbols. On kernels with
+        # few symbols, don't read past its end: the null first entry was
+        # skipped above, and the null bytes of the last entry may run
+        # into the padding after the table)
+        number_of_markers = (self.number_of_symbols + 255) // 256
+
+        for null_separated_bytes_chunks in range(
+            min(20, number_of_markers - 2)
+        ):
             num_non_null_bytes = (
                 1  # we always start at a non-null byte in this loop
             )
