@@ -40,7 +40,7 @@ def main():
             '[!] No compressed or packed data was recognized '
             + 'within the given input kernel file'
         )
-        exit()
+        exit(1)
 
     with open(args.output_file, 'wb') as output_bin:
         output_bin.write(uncompressed_data)
