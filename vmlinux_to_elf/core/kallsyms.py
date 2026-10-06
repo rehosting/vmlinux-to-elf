@@ -1179,7 +1179,12 @@ class KallsymsFinder:
                     self.kernel_img,
                     position,
                 )
-                if entries[0] != 0:
+                # (kallsyms_markers ends before kallsyms_token_table)
+                if (
+                    entries[0] != 0
+                    or position + 4 * table_element_size
+                    > self.kallsyms_token_table__offset
+                ):
                     continue
 
                 for i in range(1, len(entries)):
