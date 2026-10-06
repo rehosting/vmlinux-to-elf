@@ -846,7 +846,9 @@ class KallsymsFinder:
         assert position >= 0 and self.kernel_img[position] == 0
 
         for tokens_backwards in range(current_index_in_array):
-            for chars_in_token_backwards in range(50):
+            # (a token is at most as long as a symbol name, that is
+            # KSYM_NAME_LEN, 128 bytes before Linux 6.1)
+            for chars_in_token_backwards in range(128):
                 position -= 1
                 assert position >= 0
 
@@ -858,7 +860,7 @@ class KallsymsFinder:
                 ] > ord('z'):
                     break
 
-                if chars_in_token_backwards >= 50 - 1:
+                if chars_in_token_backwards >= 128 - 1:
                     raise ValueError(
                         'This structure is not a kallsyms_token_table'
                     )
@@ -889,13 +891,13 @@ class KallsymsFinder:
                 position - self.kallsyms_token_table__offset
             )
 
-            for chars_in_token_forward in range(50):
+            for chars_in_token_forward in range(128):
                 position += 1
 
                 if self.kernel_img[position] == 0:
                     break
 
-                if chars_in_token_forward >= 50 - 1:
+                if chars_in_token_forward >= 128 - 1:
                     raise ValueError(
                         'This structure is not a kallsyms_token_table'
                     )
