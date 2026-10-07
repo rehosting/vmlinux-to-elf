@@ -4,7 +4,15 @@ import logging
 from io import BytesIO
 
 from vmlinux_to_elf.core.architecture_detecter import ArchitectureGuessError
-from vmlinux_to_elf.core.kallsyms import KallsymsFinder, KallsymsSymbolType
+from vmlinux_to_elf.core.kallsyms import (
+    KallsymsFinder,
+    KallsymsNotFoundException,
+    KallsymsSymbolType,
+)
+from vmlinux_to_elf.core.ksymtab import (
+    KsymtabFinder,
+    replace_kernel_sections,
+)
 from vmlinux_to_elf.core.auto_unpack import Signature
 from vmlinux_to_elf.utils.elf import (
     SH_FLAGS,
@@ -49,7 +57,17 @@ class ElfSymbolizer:
         file_offset: int = None,
         override_relative: bool = None,
         # extra_info: bool = False,
+        ksymtab_fallback: bool = False,
+        ksymtab_only: bool = False,
     ):
+        """
+        ksymtab_fallback: when the kernel has no kallsyms, recover its
+        exported symbols from __ksymtab (core.ksymtab) instead of
+        failing. ksymtab_only: do that even when it has kallsyms.
+        `symbol_source` tells which table the symbols came from
+        ('kallsyms' or 'ksymtab'), and `ksymtab` what core.ksymtab
+        found (KsymtabFinder.summary(), else None).
+        """
 
         if file_contents.startswith(
             Signature.uImage.value
@@ -65,13 +83,34 @@ class ElfSymbolizer:
         if file_offset:
             file_contents = file_contents[file_offset:]
 
-        kallsyms_finder = KallsymsFinder(
-            file_contents,
-            bit_size,
-            override_relative,
-            base_address,
-            # extra_info,
-        )
+        if ksymtab_only:
+            kallsyms_finder = KsymtabFinder(
+                file_contents, bit_size, base_address
+            )
+        else:
+            try:
+                kallsyms_finder = KallsymsFinder(
+                    file_contents,
+                    bit_size,
+                    override_relative,
+                    base_address,
+                    # extra_info,
+                )
+            except KallsymsNotFoundException as error:
+                if not ksymtab_fallback:
+                    raise
+                logging.warning(
+                    f'[!] No kallsyms ({error}); recovering the exported '
+                    + 'symbols from __ksymtab instead'
+                )
+                kallsyms_finder = KsymtabFinder(
+                    file_contents, bit_size, base_address
+                )
+        self.symbol_source = 'kallsyms'
+        self.ksymtab = None
+        if isinstance(kallsyms_finder, KsymtabFinder):
+            self.symbol_source = 'ksymtab'
+            self.ksymtab = kallsyms_finder.summary()
 
         if elf_machine is None and not kallsyms_finder.elf_machine:
             raise ArchitectureGuessError(
@@ -173,6 +212,9 @@ class ElfSymbolizer:
 
             kernel.sections += [bss]
 
+            if isinstance(kallsyms_finder, KsymtabFinder):
+                replace_kernel_sections(kernel, kallsyms_finder, file_contents)
+
         r"""
             Find the entry point symbol. Based on executing this command
             on the Linux tree source:
@@ -217,6 +259,15 @@ class ElfSymbolizer:
                 entry_point_address = symbol.virtual_address
 
                 break
+
+        if entry_point_address is None and isinstance(
+            kallsyms_finder, KsymtabFinder
+        ):
+            # Linker symbols are not exported: the image starts the kernel
+            # (an ELF input keeps its own entry point)
+            entry_point_address = (
+                kallsyms_finder.entry_point or kernel.file_header.e_entry
+            )
 
         if entry_point_address is None:
             raise ValueError('No entry point symbol found in the kallsyms')
