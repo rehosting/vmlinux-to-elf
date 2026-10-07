@@ -153,6 +153,8 @@ While these are parsed in the following order by `vmlinux-to-elf`'s parsing algo
 ## Kernels support
 It should support kernels from version 2.6.10 (December 2004), until the current 6.4 (as of August 2023). Only kernels explicitly configured without `CONFIG_KALLSYMS` should not be supported. If this kernel configuration variable was not set at build, then you will get: `KallsymsNotFoundException: No embedded symbol table found in this kernel`.
 
+Such a kernel still carries, if it was built with module support, the table of its exported symbols (`__ksymtab`, `__ksymtab_gpl` and `__ksymtab_strings`, one entry per `EXPORT_SYMBOL`). With `--ksymtab-fallback`, a kernel without kallsyms gets an ELF with these exported symbols instead of the error (`--ksymtab-only` does that even when kallsyms is present). The tables are found by their structure (absolute entries, or the PREL32 entries of 4.19+ kernels, with or without a namespace field, in either byte order), and the base address from the entries (absolute) or from the pointers in the image to exported symbols (PREL32). Without linker symbols, the sections are only `.text` (up to the kernel banner), `.rodata` (up to the end of `__ksymtab_strings`) and `.data` (the rest, init sections included). See `vmlinux_to_elf/core/ksymtab.py`.
+
 For raw kernels, the following architectures can be detected (using magics from [binwalk](https://github.com/ReFirmLabs/binwalk/blob/master/src/binwalk/magic/binarch)): MIPSEL, MIPSEB, ARMEL, ARMEB, PowerPC, SPARC, x86, x86-64, ARM64, MIPS64, SuperH, ARC.
 
 The following kernel compression formats can be automatically detected: XZ, LZMA, GZip, BZ2, LZ4, LZO and Zstd.
@@ -167,7 +169,8 @@ Some parameters that should be automatically inferred by the tool (such as the i
 $ vmlinux-to-elf -h
 usage: vmlinux-to-elf [-h] [--e-machine DECIMAL_NUMBER] [--bit-size BIT_SIZE]
                       [--file-offset HEX_NUMBER] [--base-address HEX_NUMBER]
-                      [--bss-size BSS_SIZE] [--use-absolute]
+                      [--bss-size BSS_SIZE] [--ksymtab-fallback]
+                      [--ksymtab-only] [--use-absolute]
                       input_file output_file
 
 Turn a raw or compressed kernel binary, or a kernel ELF without symbols, into a fully analyzable ELF whose symbols were extracted from the kernel symbol table
@@ -187,6 +190,8 @@ options:
   --base-address HEX_NUMBER
                         Force overriding the output ELF base address field with this integer value (rather than auto-detect)
   --bss-size BSS_SIZE   Size in megabytes of the .bss section in the binary
+  --ksymtab-fallback    When the kernel has no kallsyms, recover its exported symbols from __ksymtab/__ksymtab_strings instead of failing
+  --ksymtab-only        Recover only the exported symbols from __ksymtab, even when the kernel has kallsyms
   --use-absolute        Assume kallsyms offsets are absolute addresses
 
 ```

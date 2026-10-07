@@ -79,6 +79,20 @@ def main():
     )
 
     args.add_argument(
+        '--ksymtab-fallback',
+        help='When the kernel has no kallsyms, recover its exported symbols '
+        + 'from __ksymtab/__ksymtab_strings instead of failing',
+        action='store_true',
+    )
+
+    args.add_argument(
+        '--ksymtab-only',
+        help='Recover only the exported symbols from __ksymtab, even when '
+        + 'the kernel has kallsyms',
+        action='store_true',
+    )
+
+    args.add_argument(
         '--use-absolute',
         help='Assume kallsyms offsets are absolute addresses',
         action='store_true',
@@ -119,6 +133,8 @@ def main():
                 args.use_absolute,
                 # args.extra_info,
                 split_sections=args.split_sections,
+                ksymtab_fallback=args.ksymtab_fallback,
+                ksymtab_only=args.ksymtab_only,
             )
 
         except ArchitectureGuessError:
