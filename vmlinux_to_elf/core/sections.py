@@ -27,6 +27,7 @@
 """
 from typing import Dict, List, Optional, Tuple
 
+EM_ARM = 40
 EM_MIPS = 8
 
 RODATA_NAMES = {'linux_banner', 'linux_proc_banner'}
@@ -59,6 +60,14 @@ def kernel_sections(
     etext = inside.get('_etext')
     init_name, init = _first(inside, '__init_begin', '_sinittext')
     einittext = inside.get('_einittext')
+    if (init is None and elf_machine == EM_ARM and etext is not None
+            and einittext is not None and etext < einittext
+            and text is not None and text < etext):
+        # 32-bit ARM 3.x without --all keeps _etext and _einittext but neither
+        # init start: there __init_begin = ALIGN(_etext, PAGE_SIZE) and init
+        # text follows at once, and _etext is page-aligned (3.2/3.4/3.6 vendor
+        # kernels), so init starts at _etext
+        init_name, init = '_etext (ARM: __init_begin follows it)', etext
 
     missing = [
         name
