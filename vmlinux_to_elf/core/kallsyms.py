@@ -558,12 +558,14 @@ class KallsymsFinder:
     @staticmethod
     def is_kernel_rela(elf64_rela) -> bool:
         """
-            The kernel's own R_AARCH64_RELATIVE entries patch kernel virtual
-            addresses (upper half). A run of small r_offsets is another
-            object's table, e.g. a PIE program in an embedded initramfs.
+        The kernel's own R_AARCH64_RELATIVE entries patch kernel virtual
+        addresses (upper half). A run of small r_offsets is another
+        object's table, e.g. a PIE program in an embedded initramfs.
         """
         KERNEL_HALF = 0xFFFF000000000000
-        high = sum(1 for r_offset, _, _ in elf64_rela if r_offset >= KERNEL_HALF)
+        high = sum(
+            1 for r_offset, _, _ in elf64_rela if r_offset >= KERNEL_HALF
+        )
         if high * 10 >= len(elf64_rela) * 9:
             return True
         logging.info(
