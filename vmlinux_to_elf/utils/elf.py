@@ -1056,9 +1056,10 @@ class ElfRel(ElfSection):
                 relocation.associated_symbol
             )
 
-        self.section_header.sh_link = self.elf_file.sections.index(
-            self.elf_file.symbol_table
-        )
+        if self.elf_file.symbol_table:
+            self.section_header.sh_link = self.elf_file.sections.index(
+                self.elf_file.symbol_table
+            )
 
         self.section_header.sh_entsize = memoryview(
             self.relocation_table[0]
@@ -1116,9 +1117,10 @@ class ElfRela(ElfSection):
     def pre_serialize(self):
         super().pre_serialize()
 
-        self.section_header.sh_link = self.elf_file.sections.index(
-            self.elf_file.symbol_table
-        )
+        if self.elf_file.symbol_table:
+            self.section_header.sh_link = self.elf_file.sections.index(
+                self.elf_file.symbol_table
+            )
 
         self.section_header.sh_entsize = memoryview(
             self.relocation_table[0]
