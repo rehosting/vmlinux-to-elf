@@ -25,6 +25,13 @@ from vmlinux_to_elf.kernel_db.database import (
     KnownArchitecture,
 )
 
+# Longest kallsyms_token_table token accepted. A token is a substring of
+# symbol names, so it is bounded by KSYM_NAME_LEN: 128 before Linux 6.1,
+# 512 since. The old limit of 50 rejected a 53-character token on 2.6.12;
+# a larger bound than needed only weakens the check that a candidate really
+# is a token table.
+MAX_TOKEN_LENGTH = 128
+
 """
     This class will take a raw kernel image (.IMG), and return the file
     offsets for all kernel symbols, as well as the kallsyms_* structs and
@@ -846,9 +853,7 @@ class KallsymsFinder:
         assert position >= 0 and self.kernel_img[position] == 0
 
         for tokens_backwards in range(current_index_in_array):
-            # (a token is at most as long as a symbol name, that is
-            # KSYM_NAME_LEN, 128 bytes before Linux 6.1)
-            for chars_in_token_backwards in range(128):
+            for chars_in_token_backwards in range(MAX_TOKEN_LENGTH):
                 position -= 1
                 assert position >= 0
 
@@ -860,7 +865,7 @@ class KallsymsFinder:
                 ] > ord('z'):
                     break
 
-                if chars_in_token_backwards >= 128 - 1:
+                if chars_in_token_backwards >= MAX_TOKEN_LENGTH - 1:
                     raise ValueError(
                         'This structure is not a kallsyms_token_table'
                     )
@@ -891,13 +896,13 @@ class KallsymsFinder:
                 position - self.kallsyms_token_table__offset
             )
 
-            for chars_in_token_forward in range(128):
+            for chars_in_token_forward in range(MAX_TOKEN_LENGTH):
                 position += 1
 
                 if self.kernel_img[position] == 0:
                     break
 
-                if chars_in_token_forward >= 128 - 1:
+                if chars_in_token_forward >= MAX_TOKEN_LENGTH - 1:
                     raise ValueError(
                         'This structure is not a kallsyms_token_table'
                     )
