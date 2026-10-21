@@ -143,6 +143,8 @@ class KallsymsFinder:
     kallsyms_markers__offset: int = None
 
     kallsyms_token_table__offset: int = None
+    # (unaligned offsets to retry when the kernel isn't aligned in the image)
+    kallsyms_token_table__other_offsets: list[int] = None
     kallsyms_token_index__offset: int = None
     kallsyms_token_index_end__offset: int = None
 
